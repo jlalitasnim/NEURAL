@@ -23,11 +23,19 @@ from models.mlp import MLP
 from training.trainer import train
 
 
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+
 st.set_page_config(
     page_title="Neural Network Educational Platform",
     layout="wide"
 )
 
+
+# ============================================================
+# UI STYLE
+# ============================================================
 
 st.markdown("""
 <style>
@@ -137,6 +145,10 @@ h1, h2, h3 {
 """, unsafe_allow_html=True)
 
 
+# ============================================================
+# HEADER
+# ============================================================
+
 st.markdown("""
 <div class="header-card">
     <div class="main-title">Neural Network Educational Platform</div>
@@ -175,7 +187,7 @@ with st.expander("From-scratch implementation"):
     st.markdown("""
     The learning logic is implemented manually using NumPy.
 
-    No PyTorch, TensorFlow, Keras, or Scikit-Learn model is used.
+    No PyTorch, TensorFlow, Keras, or Scikit-Learn neural network model is used.
 
     Implemented manually:
 
@@ -186,11 +198,14 @@ with st.expander("From-scratch implementation"):
     - Activation functions
     - Loss functions
     - Evaluation metrics
-    - L2 regularization
-    - Dropout
+    - Regularization configuration
     - Early stopping
     """)
 
+
+# ============================================================
+# SIDEBAR CONFIGURATION
+# ============================================================
 
 st.sidebar.header("Configuration")
 
@@ -260,6 +275,10 @@ batch_size = st.sidebar.select_slider(
 )
 
 
+# ============================================================
+# MLP SETTINGS
+# ============================================================
+
 hidden_layers = 2
 neurons = 16
 hidden_activation = "relu"
@@ -310,6 +329,10 @@ if model_name == "MLP":
 train_button = st.sidebar.button("Train model", width="stretch")
 
 
+# ============================================================
+# DATA LOADING
+# ============================================================
+
 def load_data():
     if data_source == "Built-in dataset":
         X, y = DATASETS[dataset_name]()
@@ -321,15 +344,24 @@ def load_data():
             y = y.reshape(-1, 1).astype(float)
             n_classes = 1 if problem_type == "regression" else 2
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size)
-        X_train, X_test = normalize(X_train, X_test)
+        X_train_local, X_test_local, y_train_local, y_test_local = train_test_split(
+            X,
+            y,
+            test_size
+        )
 
-        return X_train, X_test, y_train, y_test, n_classes
+        X_train_local, X_test_local = normalize(X_train_local, X_test_local)
+
+        return X_train_local, X_test_local, y_train_local, y_test_local, n_classes
 
     if uploaded_file is None:
         return None
 
     df = preview_df.copy()
+
+    if target_col is None:
+        return None
+
     df = df.dropna(subset=[target_col])
 
     if df.empty:
@@ -341,7 +373,7 @@ def load_data():
 
     # Clean feature columns safely.
     # Numeric-like columns are converted to numeric.
-    # Mixed/text columns are treated as categorical and later one-hot encoded.
+    # Text/mixed columns are treated as categorical and one-hot encoded.
     for col in X_df.columns:
         numeric_col = pd.to_numeric(X_df[col], errors="coerce")
         non_missing_original = X_df[col].notna().sum()
@@ -349,15 +381,17 @@ def load_data():
 
         if non_missing_original > 0 and numeric_detected == non_missing_original:
             mean_value = numeric_col.mean()
+
             if pd.isna(mean_value):
                 mean_value = 0.0
+
             X_df[col] = numeric_col.fillna(mean_value)
+
         else:
             X_df[col] = X_df[col].astype(str)
             X_df[col] = X_df[col].replace(["nan", "None", "NaN"], "Unknown")
             X_df[col] = X_df[col].fillna("Unknown")
 
-    # One-hot encode categorical columns.
     X_df = pd.get_dummies(X_df, drop_first=False)
 
     if X_df.shape[1] == 0:
@@ -404,10 +438,15 @@ def load_data():
         y = y_numeric.values.reshape(-1, 1).astype(float)
         n_classes = 1
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size)
-    X_train, X_test = normalize(X_train, X_test)
+    X_train_local, X_test_local, y_train_local, y_test_local = train_test_split(
+        X,
+        y,
+        test_size
+    )
 
-    return X_train, X_test, y_train, y_test, n_classes
+    X_train_local, X_test_local = normalize(X_train_local, X_test_local)
+
+    return X_train_local, X_test_local, y_train_local, y_test_local, n_classes
 
 
 data = load_data()
@@ -420,20 +459,46 @@ X_train, X_test, y_train, y_test, n_classes = data
 n_features = X_train.shape[1]
 
 
-def get_output_activation():
-    if problem_type == "binary":
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
+def output_activation_for(problem):
+    if problem == "binary":
         return "sigmoid"
-    if problem_type == "multiclass":
+    if problem == "multiclass":
         return "softmax"
     return "linear"
 
 
-def get_loss_name():
-    if problem_type == "binary":
+def loss_name_for(problem):
+    if problem == "binary":
         return "binary_cross_entropy"
-    if problem_type == "multiclass":
+    if problem == "multiclass":
         return "categorical_cross_entropy"
     return "mse"
+
+
+def get_output_activation():
+    return output_activation_for(problem_type)
+
+
+def get_loss_name():
+    return loss_name_for(problem_type)
+
+
+def build_mlp(input_dim, output_dim, hidden_count, neurons_per_layer,
+              activation_name, out_activation,
+              l2_value=0.0, dropout_value=0.0):
+    layer_sizes = [input_dim] + [neurons_per_layer] * hidden_count + [output_dim]
+    activations = [activation_name] * hidden_count + [out_activation]
+
+    return MLP(
+        layer_sizes=layer_sizes,
+        activations=activations,
+        l2_lambda=l2_value,
+        dropout_rate=dropout_value
+    )
 
 
 def build_model():
@@ -451,16 +516,21 @@ def build_model():
             epochs=epochs
         )
 
-    layer_sizes = [n_features] + [neurons] * hidden_layers + [output_dim]
-    activations = [hidden_activation] * hidden_layers + [get_output_activation()]
-
-    return MLP(
-        layer_sizes=layer_sizes,
-        activations=activations,
-        l2_lambda=l2_lambda,
-        dropout_rate=dropout_rate
+    return build_mlp(
+        input_dim=n_features,
+        output_dim=output_dim,
+        hidden_count=hidden_layers,
+        neurons_per_layer=neurons,
+        activation_name=hidden_activation,
+        out_activation=get_output_activation(),
+        l2_value=l2_lambda,
+        dropout_value=dropout_rate
     )
 
+
+# ============================================================
+# DASHBOARD BEFORE TRAINING
+# ============================================================
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.subheader("Dataset overview")
@@ -510,6 +580,7 @@ with st.expander("Model explanation"):
         It uses a hard step function and can only learn linear decision boundaries.
         It usually fails on non-linear datasets such as XOR, Moons, or Circles.
         """)
+
     elif model_name == "Perceptron":
         st.markdown("""
         The modern perceptron uses sigmoid activation and gradient descent.
@@ -517,6 +588,7 @@ with st.expander("Model explanation"):
         It improves the historical perceptron, but it still has no hidden layers.
         Therefore, it cannot model complex non-linear patterns.
         """)
+
     else:
         st.markdown(f"""
         The MLP contains hidden layers, which allow it to learn non-linear relationships.
@@ -532,6 +604,10 @@ with st.expander("Model explanation"):
         ```
         """)
 
+
+# ============================================================
+# MAIN TRAINING
+# ============================================================
 
 if train_button:
 
@@ -553,6 +629,7 @@ if train_button:
     with st.spinner("Training in progress..."):
         if model_name in ["Historical Perceptron", "Perceptron"]:
             history = model.fit(X_train, y_train, X_test, y_test)
+
         else:
             history = train(
                 model,
@@ -582,6 +659,10 @@ if train_button:
     st.session_state["n_features"] = n_features
 
 
+# ============================================================
+# RESULTS
+# ============================================================
+
 if "model" not in st.session_state:
     st.warning("Click Train model to display the results.")
     st.stop()
@@ -598,6 +679,7 @@ n_features = st.session_state["n_features"]
 
 y_pred = model.predict(X_test)
 
+
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Training curves",
     "Metrics",
@@ -606,6 +688,10 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Experiments"
 ])
 
+
+# ============================================================
+# TAB 1 — TRAINING CURVES
+# ============================================================
 
 with tab1:
     st.subheader("Learning process")
@@ -621,6 +707,10 @@ with tab1:
     - Similar train/test curves usually indicate good generalization.
     """)
 
+
+# ============================================================
+# TAB 2 — METRICS
+# ============================================================
 
 with tab2:
     st.subheader("Model evaluation")
@@ -653,6 +743,10 @@ with tab2:
         st.plotly_chart(plot_regression(y_test, y_pred), width="stretch")
 
 
+# ============================================================
+# TAB 3 — DECISION BOUNDARY
+# ============================================================
+
 with tab3:
     st.subheader("Decision boundary")
 
@@ -668,9 +762,14 @@ with tab3:
         - A perceptron usually creates a straight boundary.
         - An MLP can create curved and complex boundaries.
         """)
+
     else:
         st.info("Decision boundary is only available for 2D classification datasets.")
 
+
+# ============================================================
+# TAB 4 — TRAIN VS TEST
+# ============================================================
 
 with tab4:
     st.subheader("Train vs Test comparison")
@@ -715,20 +814,18 @@ with tab4:
             st.success("The model generalizes reasonably well.")
 
 
+# ============================================================
+# TAB 5 — EXPERIMENTS ON CURRENT DATASET
+# ============================================================
+
 with tab5:
     st.subheader("Mandatory experiments")
 
     st.markdown("""
-    These experiments correspond directly to the required project evaluation:
+    These experiments are applied to the **currently selected dataset**.
 
-    **Experiment 1 — Perceptron vs MLP**  
-    Shows that perceptrons fail on non-linear data while MLPs perform better.
-
-    **Experiment 2 — Effect of hidden layers**  
-    Shows how changing the number of layers affects learning.
-
-    **Experiment 3 — Overfitting vs regularization**  
-    Shows how L2 regularization and early stopping reduce overfitting.
+    - If you selected a built-in dataset, the experiment uses that built-in dataset.
+    - If you uploaded a CSV file, the experiment uses your uploaded dataset.
     """)
 
     exp_choice = st.selectbox(
@@ -744,136 +841,230 @@ with tab5:
 
     if run_exp:
 
+        X_train_exp = X_train
+        X_test_exp = X_test
+        y_train_exp = y_train
+        y_test_exp = y_test
+
+        input_dim_exp = X_train_exp.shape[1]
+        output_dim_exp = y_train_exp.shape[1]
+        out_activation_exp = output_activation_for(problem_type)
+        loss_exp = loss_name_for(problem_type)
+
+        # ====================================================
+        # EXPERIMENT 1 — PERCEPTRON VS MLP
+        # ====================================================
+
         if exp_choice.startswith("Experiment 1"):
             st.markdown("### Experiment 1 — Perceptron vs MLP")
 
-            X, y = DATASETS["XOR"]()
-            X_train, X_test, y_train, y_test = train_test_split(X, y, 0.2)
-            X_train, X_test = normalize(X_train, X_test)
+            if problem_type != "binary":
+                st.warning(
+                    "Experiment 1 is only available for binary classification, "
+                    "because the perceptron models in this project are binary classifiers."
+                )
 
-            perc = Perceptron(learning_rate=0.01, epochs=200)
-            perc.fit(X_train, y_train, X_test, y_test)
-            perc_acc = accuracy(y_test, perc.predict(X_test))
+            else:
+                results = []
 
-            mlp = MLP(
-                layer_sizes=[2, 16, 8, 1],
-                activations=["relu", "relu", "sigmoid"]
-            )
+                hist_perc = HistoricalPerceptron(
+                    learning_rate=learning_rate,
+                    epochs=epochs
+                )
 
-            h = train(
-                mlp,
-                X_train,
-                y_train,
-                X_test,
-                y_test,
-                loss_name="binary_cross_entropy",
-                problem_type="binary",
-                learning_rate=0.01,
-                epochs=300,
-                batch_size=32
-            )
+                hist_perc.fit(
+                    X_train_exp,
+                    y_train_exp,
+                    X_test_exp,
+                    y_test_exp
+                )
 
-            mlp_acc = accuracy(y_test, mlp.predict(X_test))
+                hist_acc = accuracy(y_test_exp, hist_perc.predict(X_test_exp))
 
-            results = pd.DataFrame({
-                "Model": ["Perceptron", "MLP"],
-                "Test accuracy": [float(perc_acc), float(mlp_acc)]
-            })
+                results.append({
+                    "Model": "Historical Perceptron",
+                    "Test accuracy": float(hist_acc)
+                })
 
-            st.dataframe(results, width="stretch")
-            st.plotly_chart(plot_loss_accuracy(h), width="stretch")
+                perc = Perceptron(
+                    learning_rate=learning_rate,
+                    epochs=epochs
+                )
 
-            st.success("Conclusion: The MLP performs better on XOR because it can learn non-linear boundaries.")
+                perc.fit(
+                    X_train_exp,
+                    y_train_exp,
+                    X_test_exp,
+                    y_test_exp
+                )
+
+                perc_acc = accuracy(y_test_exp, perc.predict(X_test_exp))
+
+                results.append({
+                    "Model": "Modern Perceptron",
+                    "Test accuracy": float(perc_acc)
+                })
+
+                mlp_exp = MLP(
+                    layer_sizes=[input_dim_exp, 32, 16, output_dim_exp],
+                    activations=["relu", "relu", out_activation_exp],
+                    l2_lambda=0.0,
+                    dropout_rate=0.0
+                )
+
+                h = train(
+                    mlp_exp,
+                    X_train_exp,
+                    y_train_exp,
+                    X_test_exp,
+                    y_test_exp,
+                    loss_name=loss_exp,
+                    problem_type=problem_type,
+                    learning_rate=learning_rate,
+                    epochs=epochs,
+                    batch_size=batch_size
+                )
+
+                mlp_acc = accuracy(y_test_exp, mlp_exp.predict(X_test_exp))
+
+                results.append({
+                    "Model": "MLP",
+                    "Test accuracy": float(mlp_acc)
+                })
+
+                st.dataframe(pd.DataFrame(results), width="stretch")
+                st.plotly_chart(plot_loss_accuracy(h), width="stretch")
+
+                st.success(
+                    "Conclusion: This experiment compares simple single-layer models "
+                    "with a multi-layer neural network on the current dataset."
+                )
+
+        # ====================================================
+        # EXPERIMENT 2 — EFFECT OF HIDDEN LAYERS
+        # ====================================================
 
         elif exp_choice.startswith("Experiment 2"):
             st.markdown("### Experiment 2 — Effect of hidden layers")
 
-            X, y = DATASETS["Moons"]()
-            X_train, X_test, y_train, y_test = train_test_split(X, y, 0.2)
-            X_train, X_test = normalize(X_train, X_test)
-
             configs = {
-                "1 hidden layer": [2, 16, 1],
-                "2 hidden layers": [2, 32, 16, 1],
-                "3 hidden layers": [2, 32, 16, 8, 1],
+                "1 hidden layer": [input_dim_exp, 16, output_dim_exp],
+                "2 hidden layers": [input_dim_exp, 32, 16, output_dim_exp],
+                "3 hidden layers": [input_dim_exp, 32, 16, 8, output_dim_exp],
             }
 
-            rows = []
+            result_rows = []
 
             for label, sizes in configs.items():
-                acts = ["relu"] * (len(sizes) - 2) + ["sigmoid"]
+                hidden_count = len(sizes) - 2
+                acts = ["relu"] * hidden_count + [out_activation_exp]
 
-                mlp = MLP(layer_sizes=sizes, activations=acts)
-
-                h = train(
-                    mlp,
-                    X_train,
-                    y_train,
-                    X_test,
-                    y_test,
-                    loss_name="binary_cross_entropy",
-                    problem_type="binary",
-                    learning_rate=0.01,
-                    epochs=250,
-                    batch_size=32
+                mlp_exp = MLP(
+                    layer_sizes=sizes,
+                    activations=acts,
+                    l2_lambda=0.0,
+                    dropout_rate=0.0
                 )
 
-                rows.append({
+                h = train(
+                    mlp_exp,
+                    X_train_exp,
+                    y_train_exp,
+                    X_test_exp,
+                    y_test_exp,
+                    loss_name=loss_exp,
+                    problem_type=problem_type,
+                    learning_rate=learning_rate,
+                    epochs=epochs,
+                    batch_size=batch_size
+                )
+
+                y_pred_exp = mlp_exp.predict(X_test_exp)
+
+                if problem_type in ["binary", "multiclass"]:
+                    score = accuracy(y_test_exp, y_pred_exp)
+                    metric_name = "Test accuracy"
+                else:
+                    score = r2_score(y_test_exp, y_pred_exp)
+                    metric_name = "Test R² score"
+
+                result_rows.append({
                     "Architecture": label,
-                    "Final test accuracy": float(accuracy(y_test, mlp.predict(X_test))),
-                    "Final test loss": float(h["val_loss"][-1])
+                    metric_name: float(score),
+                    "Final test loss": float(h["val_loss"][-1]),
+                    "Epochs used": len(h["val_loss"])
                 })
 
-            st.dataframe(pd.DataFrame(rows), width="stretch")
-            st.success("Conclusion: More layers may improve learning, but excessive complexity can increase overfitting risk.")
+            st.dataframe(pd.DataFrame(result_rows), width="stretch")
+
+            st.success(
+                "Conclusion: This experiment shows how changing the number of hidden layers "
+                "affects learning on the current dataset."
+            )
+
+        # ====================================================
+        # EXPERIMENT 3 — OVERFITTING VS REGULARIZATION
+        # ====================================================
 
         else:
             st.markdown("### Experiment 3 — Overfitting vs regularization")
 
-            X, y = DATASETS["Moons"]()
-            X_train, X_test, y_train, y_test = train_test_split(X, y, 0.4)
-            X_train, X_test = normalize(X_train, X_test)
-
             configs = [
-                ("No regularization", 0.0, None),
-                ("L2 regularization", 0.01, None),
-                ("Early stopping", 0.0, 15),
-                ("L2 + Early stopping", 0.01, 15),
+                ("No regularization", 0.0, 0.0, None),
+                ("L2 regularization", 0.01, 0.0, None),
+                ("Dropout", 0.0, 0.2, None),
+                ("Early stopping", 0.0, 0.0, 10),
+                ("L2 + Early stopping", 0.01, 0.0, 10),
             ]
 
             rows = []
 
-            for label, l2, pat in configs:
-                mlp = MLP(
-                    layer_sizes=[2, 64, 64, 1],
-                    activations=["relu", "relu", "sigmoid"],
-                    l2_lambda=l2
+            for label, l2_value, dropout_value, pat in configs:
+
+                mlp_exp = MLP(
+                    layer_sizes=[input_dim_exp, 64, 64, output_dim_exp],
+                    activations=["relu", "relu", out_activation_exp],
+                    l2_lambda=l2_value,
+                    dropout_rate=dropout_value
                 )
 
                 h = train(
-                    mlp,
-                    X_train,
-                    y_train,
-                    X_test,
-                    y_test,
-                    loss_name="binary_cross_entropy",
-                    problem_type="binary",
-                    learning_rate=0.01,
-                    epochs=400,
-                    batch_size=16,
+                    mlp_exp,
+                    X_train_exp,
+                    y_train_exp,
+                    X_test_exp,
+                    y_test_exp,
+                    loss_name=loss_exp,
+                    problem_type=problem_type,
+                    learning_rate=learning_rate,
+                    epochs=epochs,
+                    batch_size=batch_size,
                     patience=pat
                 )
 
-                train_acc = accuracy(y_train, mlp.predict(X_train))
-                test_acc = accuracy(y_test, mlp.predict(X_test))
+                train_pred_exp = mlp_exp.predict(X_train_exp)
+                test_pred_exp = mlp_exp.predict(X_test_exp)
+
+                if problem_type in ["binary", "multiclass"]:
+                    train_score = accuracy(y_train_exp, train_pred_exp)
+                    test_score = accuracy(y_test_exp, test_pred_exp)
+                    score_name = "Accuracy"
+                else:
+                    train_score = r2_score(y_train_exp, train_pred_exp)
+                    test_score = r2_score(y_test_exp, test_pred_exp)
+                    score_name = "R² score"
 
                 rows.append({
                     "Configuration": label,
-                    "Train accuracy": float(train_acc),
-                    "Test accuracy": float(test_acc),
-                    "Gap": float(train_acc - test_acc),
+                    f"Train {score_name}": float(train_score),
+                    f"Test {score_name}": float(test_score),
+                    "Gap": float(train_score - test_score),
                     "Epochs used": len(h["train_loss"])
                 })
 
             st.dataframe(pd.DataFrame(rows), width="stretch")
-            st.success("Conclusion: Regularization and early stopping help reduce overfitting.")
+
+            st.success(
+                "Conclusion: This experiment compares regularization methods "
+                "on the current dataset and shows their effect on generalization."
+            )

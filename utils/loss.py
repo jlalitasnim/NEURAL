@@ -1,5 +1,6 @@
 import numpy as np
 
+
 EPS = 1e-15
 
 
@@ -43,4 +44,4 @@ def get_loss(name):
     if name not in losses:
         raise ValueError(f"Unknown loss function: {name}")
 
-    return losses[name]
+    return losses[name]  # ← this line was missing
